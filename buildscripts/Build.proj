@@ -21,366 +21,198 @@ limitations under the License.
 ***********************************************************************************************
 -->
 
-<Project DefaultTargets="BuildProject" InitialTargets="CheckRequiredProperties" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="BuildProject" InitialTargets="CheckRequiredProperties" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
 	
 	<!-- Root Path definition relative for actual build file -->
 	<PropertyGroup>
-		<RootPath Condition="'$(RootPath)' == ''">$(MSBuildProjectDirectory)\..</RootPath>
+		<RootPath Condition="'$(RootPath)' == ''">$(MSBuildProjectDirectory)/..</RootPath>
 	</PropertyGroup>
 
-
 	<!-- Import common targets -->
-	<Import Project="$(RootPath)\Settings.proj" />
-	<Import Project="$(BuildScriptsPath)\Castle.Common.Targets" />
-	<Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />	
+	<Import Project="$(RootPath)/Settings.proj" />
+	<Import Project="$(BuildScriptsPath)/Castle.Common.Targets" />
+	<Import Project="$(MSBuildBinPath)/Microsoft.CSharp.Targets" Condition="($(MSBuildTargets) == '') Or ($(MSBuildTargets) == 'CSharp')" />
 
-	
+
 	<Target Name="CheckRequiredProperties">
 		<Error Condition="'$(ProjectName)' == ''" Text="The ProjectName property has not been set, please set it in Settings.proj." />
+		<Error Text="The tools version &quot;$(MSBuildToolsVersion)&quot; is not supported, MSBuild 4.0 or newer is required to build." Condition="'$(MSBuildToolsVersion)' != '4.0'" />
+
+		<Error Condition="'$(Project_Major)' == ''" Text="The Project_Major property has not been set, please set it in Settings.proj." />
+		<Error Condition="'$(Project_Minor)' == ''" Text="The Project_Minor property has not been set, please set it in Settings.proj." />
+		<Error Condition="'$(Project_Build)' == ''" Text="The Project_Build property has not been set, please set it in Settings.proj." />
 	</Target>
 		
 
-	<UsingTask
-		TaskName="NCover.MSBuildTasks.NCover"
-		AssemblyFile="$(NCoverPath)\Build Task Plugins\NCover.MSBuildTasks.dll"
-		Condition="$(TestRunner_EnableCoverage)" />
-
-	
-	<!-- Project detection -->
-	<PropertyGroup>
-		<TestDetectionExpression>.[\.]((Integration|Unit)?Test[s]{0,1}(-vs\d{4})?)</TestDetectionExpression>
-		<IntegrationTestDetectionExpression>.[\.](IntegrationTest[s]{0,1}(-vs\d{4})?)</IntegrationTestDetectionExpression>
-		<UnitTestDetectionExpression>.[\.]((Unit)?Test[s]{0,1}(-vs\d{4})?)</UnitTestDetectionExpression>
-	</PropertyGroup>
-
-	
 	<!--
 		Public targets
 	-->
 	
-	<Target Name="BuildAll" DependsOnTargets="BuildProject;BuildAllTests" />
-
-	
 	<Target
 		Name="BuildProject"
-		DependsOnTargets="_GetProjectsFromSolution"
 		>
+		<MSBuild Projects="$(SolutionPath)" Targets="Build" Properties="OutputPath=$(OutputPath);Configuration=$(Configuration);BuildConstants=$(BuildConstants);MSBuildTargets=$(MSBuildTargets);TargetFrameworkVersion=$(TargetFrameworkVersion)">
 
-		<MSBuild
-			Projects="@(AppProjects)"
-			Properties="OutputPath=$(OutputPath)"
-			Targets="Build">
-			
-			<Output TaskParameter="TargetOutputs" ItemName="AppAssemblies" />
+			<Output TaskParameter="TargetOutputs" ItemName="AllBinaries" />
 		
 		</MSBuild>
+		<Message Text="Binaries built from solution: @(AllBinaries)" />
 		
-		<!-- Add all assemblies to all build assemblies -->
-		<ItemGroup>
-			<BuildAssemblies Include="@(AppAssemblies)" />
-		</ItemGroup>
+		<!-- Resolve test projects -->
+		<RegexMatch Input="@(AllBinaries)" Expression="$(TestDetectionExpression)">
+			<Output TaskParameter="Output" ItemName="TestAssemblies" />
+		</RegexMatch>
+		<Message Text="Detected the following test assemblies: @(TestAssemblies)" />
+		<CreateProperty Value="@(TestAssemblies->'&quot;%(FullPath)&quot;', ' ')">
+			<Output PropertyName="TestAssemblies" TaskParameter="Value"/>
+		</CreateProperty>
+		<Message Text="Test assemblies transformed to quoted list: $(TestAssemblies)" />
+
+		<!-- Resolve the libraries code projects -->
+		<CreateItem
+			Include="@(AllBinaries)"
+			Exclude="@(TestAssemblies)">
+			
+			<Output TaskParameter="Include" ItemName="AppAssemblies"/>
+		</CreateItem>
 
 		<!-- Pick up the PDB files. This is kind of hard coded to the location of the AppAssemblies, but I currently don't see another way  -->
-		<ItemGroup>
-			<PdbFiles
-				Include="@(AppAssemblies->'%(RelativeDir)%(FileName).pdb')" />
-		</ItemGroup>
+		<CreateItem
+			Include="@(AppAssemblies->'%(RelativeDir)%(FileName).pdb')">
+		
+			<Output TaskParameter="Include" ItemName="PdbFiles"/>
+		</CreateItem>
 
 		<!-- Pick up the documentation XML. This is kind of hard coded to the location of the AppAssemblies, but I currently don't see another way  -->
-		<ItemGroup>
-			<DocumentationFiles
-				Include="@(AppAssemblies->'%(RelativeDir)%(FileName).xml')"
-				Condition="Exists('%(AppAssemblies.RelativeDir)%(AppAssemblies.FileName).xml')"  />
-		</ItemGroup>
-
-	</Target>
-
-	
-	<Target
-		Name="BuildAllTests"
-		DependsOnTargets="_GetProjectsFromSolution"
-		>
-		
-		<MSBuild
-			Projects="@(TestProjects)"
-			Properties="OutputPath=$(OutputPath)"
-			Targets="Build"
-			>
+		<CreateItem
+			Include="@(AppAssemblies->'%(RelativeDir)%(FileName).xml')"
+			Condition="Exists('%(AppAssemblies.RelativeDir)%(AppAssemblies.FileName).xml')">
 			
-			<Output TaskParameter="TargetOutputs" ItemName="TestAssemblies" />
+			<Output TaskParameter="Include" ItemName="DocumentationFiles"/>
 		
-		</MSBuild>
-
-		<!-- Add all assemblies to all build assemblies -->
-		<ItemGroup>
-			<BuildAssemblies Include="@(TestAssemblies)" />
-		</ItemGroup>
-	</Target>
-
-	
-	<Target
-		Name="BuildIntegrationTests"
-		DependsOnTargets="_GetProjectsFromSolution"
-		>
-		
-		<MSBuild
-			Projects="@(IntegrationTestProjects)"
-			Properties="OutputPath=$(OutputPath)"
-			Targets="Build"
-			>
-			
-			<Output TaskParameter="TargetOutputs" ItemName="TestAssemblies" />
-		
-		</MSBuild>
-
-		<!-- Add all assemblies to all build assemblies -->
-		<ItemGroup>
-			<BuildAssemblies Include="@(TestAssemblies)" />
-		</ItemGroup>
-	
-	</Target>
-
-	
-	<Target
-		Name="BuildUnitTests"
-		DependsOnTargets="_GetProjectsFromSolution"
-		>
-		
-		<MSBuild
-			Projects="@(UnitTestProjects)"
-			Properties="Configuration=$(Configuration);Platform=$(Platform)"
-			Targets="Build"
-			>
-			<Output TaskParameter="TargetOutputs" ItemName="TestAssemblies" />
-		</MSBuild>
-
-		<!-- Add all assemblies to all build assemblies -->
-		<ItemGroup>
-			<BuildAssemblies Include="@(TestAssemblies)" />
-		</ItemGroup>
-	
-	</Target>
-
-	
-	<Target Name="RebuildAll" DependsOnTargets="CleanAll;BuildAll" />
-
-	
-	<Target Name="CleanAll" DependsOnTargets="CleanProject;CleanTest" />
-
-	
-	<Target
-		Name="CleanProject"
-		DependsOnTargets="_GetProjectsFromSolution"
-		>
-		
-		<MSBuild Projects="@(AppProjects)" Targets="Clean" />
+		</CreateItem>
 
 	</Target>
 
 	
-	<Target
-		Name="CleanTest"
-		DependsOnTargets="_GetProjectsFromSolution"
-		>
-		
-		<MSBuild Projects="@(TestProjects)" Targets="Clean" />
+	<Target Name="RebuildAll" DependsOnTargets="CleanAll;BuildProject" />
+	<Target Name="ClickToBuild" DependsOnTargets="RebuildAll;_PreparePackage">
+		<RemoveDir Directories="$(OutputPath)" />
+	</Target>
 
+	<Target Name="CleanAll">
+		<MSBuild Projects="$(SolutionPath)" Targets="Clean" Properties="Configuration=$(Configuration);BuildConstants=$(BuildConstants);MSBuildTargets=$(MSBuildTargets);TargetFrameworkVersion=$(TargetFrameworkVersion)" />
+
+		<CreateItem Include="**/Debug/**/*.*;**/Release/**/*.*">
+			<Output ItemName="_binaryFiles" TaskParameter="Include"/>
+		</CreateItem>
+		<Delete Files="@(_binaryFiles)" TreatErrorsAsWarnings="true"/>
+		<Exec Command="for /f %%d in ('dir /ad /b') do rd /s /q %%d"
+			WorkingDirectory="$(BuildPath)"
+			Condition=" Exists('$(BuildPath)') "/>
+  		<RemoveDir Directories="$(BuildPath)" Condition=" Exists('$(BuildPath)') "/>
 	</Target>
 
 	
 	<Target
 		Name="RunAllTests"
-		DependsOnTargets="BuildAllTests"
+		DependsOnTargets="BuildProject"
 		>
 		
 		<CallTarget Targets="_ExecTestRunner" />
 	
 	</Target>
-
-	
-	<Target
-		Name="RunIntegrationTests"
-		DependsOnTargets="BuildIntegrationTests"
-		>
-		
-		<CallTarget Targets="_ExecTestRunner" />
-	
-	</Target>
-
-	
-	<Target
-		Name="RunUnitTests"
-		DependsOnTargets="BuildUnitTests"
-		>
-		
-		<CallTarget Targets="_ExecTestRunner" />
-	
-	</Target>
-
 
 	<!-- Creates Zip file for Release -->
 	<Target
 		Name="Package"
-		DependsOnTargets="BuildProject;RunAllTests;GetBuildRevision;_PreparePackage"
+		DependsOnTargets="RunAllTests;_PreparePackage"
 		>
 
-		<PropertyGroup>
-			<Build_ZipFile Condition="'$(Build_ZipFile)' == ''">$(ProjectName)-$(TargetFrameworkIdentifier)-$(TargetFrameworkVersion)-$(Build_Revision).zip</Build_ZipFile>
-			<Build_ZipFilePath Condition="'$(Build_ZipFilePath)' == ''">$(OutputPath)/$(Build_ZipFile)</Build_ZipFilePath>
-		</PropertyGroup>
+		<CreateProperty Value="$(ProjectName)-$(BuildConfigKey)-$(Build_Number).zip" Condition="'$(Build_ZipFile)' == ''">
+			<Output PropertyName="Build_ZipFile" TaskParameter="Value"/>
+		</CreateProperty>
+		<CreateProperty Value="$(OutputPath)../$(Build_ZipFile)" Condition="'$(Build_ZipFilePath)' == ''">
+			<Output PropertyName="Build_ZipFilePath" TaskParameter="Value"/>
+		</CreateProperty>
 
 		<Message Importance="high" Text="Creating ZIP file $(Build_ZipFilePath)"/>
 
-		<ItemGroup>
-			<FilesToPackage Include="$(PackageDir)\**\*.*" />
-		</ItemGroup>
+		<CreateItem Include="$(PackageDir)\**\*.*" Exclude="$(PackageDir)\**\*Tests*">
+			<Output ItemName="FilesToPackage" TaskParameter="Include" />
+		</CreateItem>
+
 		<Zip
 			Files="@(FilesToPackage)"
 			ZipLevel="6"
 			WorkingDirectory="$(PackageDir)"
 			ZipFileName="$(Build_ZipFilePath)"
 			/>
+			
+		<Message Text="##teamcity[publishArtifacts '$(Build_ZipFilePath)']" Condition="$(TEAMCITY_VERSION) != ''" />
 
-    <RemoveDir Directories="$(PackageDir)" ContinueOnError="true" />
+		<RemoveDir Directories="$(PackageDir)" ContinueOnError="true" />
 
 	</Target>
-
-
+	
 	<!--
 	==================================================
 		Internal targets
 	==================================================
 	-->
-
-	<!-- Executes NUnit or NCover with NUnit -->
 	<Target
 		Name="_ExecTestRunner"
-		DependsOnTargets="_CreateTestResultsFolder"
-		Condition="$(TestRunner_Enabled) And '@(TestAssemblies)' != ''"
+		Condition="$(TestRunner_Enabled)"
 		>
 		
-		<CallTarget Targets="_ExecNUnit" Condition="!$(TestRunner_EnableCoverage)" />
+		<CallTarget Targets="_ExecNUnit" Condition="$(BuildConfigKey) != 'SL30' and $(BuildConfigKey) != 'SL40'" />
 	
-		<CallTarget Targets="_ExecNCover" Condition="$(TestRunner_EnableCoverage)" />
+		<CallTarget Targets="_ExecStatLight" Condition="$(BuildConfigKey) == 'SL30' or $(BuildConfigKey) == 'SL40'" />
 
 	</Target>
 	
+
+	<!-- Use TeamCity's when running on the build server -->
+	<UsingTask TaskName="NUnitTeamCity" AssemblyFile="$(teamcity_dotnet_nunitlauncher_msbuild_task)" Condition=" '$(teamcity_dotnet_nunitlauncher_msbuild_task)' != '' "/>
 
 	<Target
 		Name="_ExecNUnit"
 		>
 
-		<PropertyGroup>
-			<NUnitTestResultXmlFiles Condition="'$(NUnitTestResultXmlFiles)' == ''">$(TestResultsPath)\nunit-results.xml</NUnitTestResultXmlFiles>
-		</PropertyGroup>
+		<MakeDir Directories="$(TestResultsPath)" Condition="'$(TestResultsPath)' != '' And !Exists('$(TestResultsPath)')" />
 
-		<NUnit 
-			ToolPath="$(NUnitPath)"
+		<CreateProperty Value="$(TestResultsPath)/nunit-results.xml" Condition="'$(NUnitTestResultXmlFiles)' == ''">
+			<Output PropertyName="NUnitTestResultXmlFiles" TaskParameter="Value"/>
+		</CreateProperty>
+		
+		<Message Text="Running tests from assemblies: $(TestAssemblies)" />
+		
+		<Exec Command="$(NUnitPath)/nunit-console-x86.exe /nologo $(TestAssemblies) /xml=$(NUnitTestResultXmlFiles) /framework=$(TargetFrameworkVersion)" Condition=" '$(TEAMCITY_VERSION)' == '' " />
+
+		<Exec Command="$(MonoShell) $(teamcity_dotnet_nunitlauncher) mono-2.0 x86 NUnit-2.5.5 $(OutputPath)Castle.Core.Tests.dll" Condition="$(MonoShell) != ''" />
+
+		<NUnitTeamCity
 			Assemblies="@(TestAssemblies)"
-			Platform="x86"
-			OutputXmlFile="$(NUnitTestResultXmlFiles)"
-			ContinueOnError="$(TestRunner_ContinueOnError)"
-			>
-			
-			<Output TaskParameter="ExitCode" PropertyName="NUnitExitCode" />
-		
-		</NUnit>
-		
-		<Error Condition="$(NUnitExitCode) != '0'" Text="NUnit failed $(NUnitExitCode) tests." />
+			NUnitVersion="NUnit-2.5.5"
+			Condition=" '$(teamcity_dotnet_nunitlauncher_msbuild_task)' != ''"
+		/>
 
 	</Target>
 
-	
-	<Target
-		Name="_ExecNCover"
-		>
-		
-		<PropertyGroup>
-			<NCoverResultXmlFiles Condition="'$(NCoverResultXmlFiles)' == ''">$(TestResultsPath)\nunit-coverage-results.xml</NCoverResultXmlFiles>
-		</PropertyGroup>
-
-		<NCover
-			ToolPath="$(NCoverPath)"
-			TestRunnerExe="$(NUnitPath)\nunit-console-x86.exe"
-			TestRunnerArgs="@(TestAssemblies) /noshadow"
-			CoverageFile="$(NCoverResultXmlFiles)"
-			ContinueOnError="$(TestRunner_ContinueOnError)"
-			Timeout="$(TestRunner_Timeout)"
-			>
-			
-			<Output TaskParameter="ExitCode" PropertyName="NCoverExitCode" />
-		
-		</NCover>
-		
-		<Error Condition="$(NCoverExitCode) != '0'" Text="NCover failed with exit code $(NCoverExitCode)." />
-	
-	</Target>
-
-	
-	<Target
-		Name="_CreateTestResultsFolder"
-		Condition="'$(TestResultsPath)' != '' And !Exists('$(TestResultsPath)')"
-		>
-		
-		<MakeDir Directories="$(TestResultsPath)" />
-	
-	</Target>
 
 	<Target
-		Name="_GetProjectsFromSolution"
+		Name="_ExecStatLight"
 		>
 
-		<!-- Get all the projects associated with the solution -->
-		<GetSolutionProjects Solution="$(SolutionPath)">
-			<Output TaskParameter="Output" ItemName="SolutionProjects" />
-		</GetSolutionProjects>
+		<CreateProperty Value='$(ToolsPath)\StatLight\StatLight.exe -b -x="$(OutputPath)Castle.Core.Tests.xap" -o=NUnit'>
+			<Output PropertyName="StatLightCmdLine" TaskParameter="Value"/>
+		</CreateProperty>
 
-		<!-- Filter out solution folders and non .csproj items -->
-		<RegexMatch Input="@(SolutionProjects)" Expression=".[\.]csproj$">
-			<Output TaskParameter="Output" ItemName="Projects" />
-		</RegexMatch>
+		<CreateProperty Value='$(StatLightCmdLine) --teamcity' Condition=" '$(TEAMCITY_VERSION)' != '' ">
+			<Output PropertyName="StatLightCmdLine" TaskParameter="Value"/>
+		</CreateProperty>
 
-		<!-- Resolve test projects -->
-		<RegexMatch Input="@(Projects)" Expression="$(TestDetectionExpression)[\.]csproj$">
-			<Output TaskParameter="Output" ItemName="TestProjects" />
-		</RegexMatch>
-
-		<RegexMatch Input="@(TestProjects)" Expression="$(IntegrationTestDetectionExpression)[\.]csproj$">
-			<Output TaskParameter="Output" ItemName="IntegrationTestProjects" />
-		</RegexMatch>
-
-		<RegexMatch Input="@(TestProjects)" Expression="$(UnitTestDetectionExpression)[\.]csproj$">
-			<Output TaskParameter="Output" ItemName="UnitTestProjects" />
-		</RegexMatch>
-
-		<!-- Resolve the libraries code projects -->
-		<ItemGroup>
-			<AppProjects Include="@(Projects)" Exclude="@(TestProjects)" />
-		</ItemGroup>
-
-		<Message
-			Text="$(NEW_LINE)Resolved the following solution projects:"
-			Importance="high"
-			/>
-		<Message
-			Text="AppProjects:$(NEW_LINE)$(TAB)@(AppProjects-&gt;'%(RelativeDir)%(FileName)%(Extension)', '$(NEW_LINE)$(TAB)')"
-			Importance="high"
-			/>
-		<Message
-			Text="TestProjects:$(NEW_LINE)$(TAB)@(TestProjects-&gt;'%(RelativeDir)%(FileName)%(Extension)', '$(NEW_LINE)$(TAB)')"
-			Importance="high"
-			/>
-	
-	</Target>
-
-	
-	<Target
-		Name="_ChangeConfigurationToRelease"
-		>
-		
-		<PropertyGroup>
-			<Configuration>Release</Configuration>
-		</PropertyGroup>
+		<Exec Command="$(StatLightCmdLine)" />
 
 	</Target>
 
@@ -388,44 +220,45 @@ limitations under the License.
 	<!-- Prepare package directory -->
 	<Target Name="_PreparePackage">
 
-		<PropertyGroup>
-			<PackageDir Condition="'$(PackageDir)' == ''">$(OutputPath)package</PackageDir>
-		</PropertyGroup>
+		<CreateProperty Value="$(OutputPath)../pkg" Condition="'$(PackageDir)' == ''">
+			<Output PropertyName="PackageDir" TaskParameter="Value"/>
+		</CreateProperty>
 
 		<RemoveDir Directories="$(PackageDir)" ContinueOnError="true" />
 
-		<ItemGroup>
-			<!-- Grab all Castle assemblies, but ignore unit test assemblies. -->
-			<_CastleDependencies Include="$(OutputPath)Castle*.dll;$(OutputPath)Castle*.xml" Exclude="$(OutputPath)Castle*.Tests.dll"/>
+		<!-- Grab all Castle assemblies, but ignore unit test assemblies. -->
+		<CreateItem Include="$(OutputPath)Castle.*.dll;$(OutputPath)Castle.*.xml" Exclude="$(OutputPath)Castle*.Tests.dll">
+			<Output TaskParameter="Include" ItemName="_CastleDependencies"/>
+		</CreateItem>
 
-			<_BuildScriptsTxtFiles Include="$(BuildScriptsPath)\*.txt"/>
-			<_Txt Include="$(RootPath)\*.txt"/>			
-			
-			<_PackageFiles Include="@(PackageFiles)" />
-  
-			<_ExcludeFromPackageFiles Include="$(ExcludeFromPackageFiles)" />
-		</ItemGroup>
-		
 		<!-- Create list with items to be copied to package directory. The metadata <DestinationFolder> controls where they wind up. -->
-		<ItemGroup>
-			<CopyToPackageDirectory Include="@(_BuildScriptsTxtFiles)">
-				<DestinationFolder>$(PackageDir)</DestinationFolder>
-			</CopyToPackageDirectory>
+		<CreateItem
+			Include="$(BuildScriptsPath)/*.txt"
+			AdditionalMetadata="DestinationFolder=$(PackageDir)">
 
-			<CopyToPackageDirectory Include="@(AppAssemblies);@(PdbFiles);@(DocumentationFiles);@(_CastleDependencies);@(_PackageFiles)">
-				<DestinationFolder>$(PackageDir)\bin</DestinationFolder>
-			</CopyToPackageDirectory>
+			<Output TaskParameter="Include" ItemName="CopyToPackageDirectory"/>
+		</CreateItem>
+		<CreateItem
+			Include="@(AppAssemblies);@(PdbFiles);@(DocumentationFiles);@(_CastleDependencies);@(PackageFiles)"
+			AdditionalMetadata="DestinationFolder=$(PackageDir)/bin">
 
-			<CopyToPackageDirectory Include="@(_Txt)">
-				<DestinationFolder>$(PackageDir)\ReleaseNotes</DestinationFolder>
-			</CopyToPackageDirectory>
-			
-			<CopyToPackageDirectory Remove="@(_ExcludeFromPackageFiles)" />
-		</ItemGroup>
+			<Output TaskParameter="Include" ItemName="CopyToPackageDirectory"/>
+		</CreateItem>
+		<CreateItem
+			Include="$(RootPath)/*.txt"
+			AdditionalMetadata="DestinationFolder=$(PackageDir)/ReleaseNotes">
+
+			<Output TaskParameter="Include" ItemName="CopyToPackageDirectory"/>
+		</CreateItem>
+		<CreateItem
+			Exclude="@(ExcludeFromPackageFiles)">
+
+			<Output TaskParameter="Include" ItemName="CopyToPackageDirectory"/>
+		</CreateItem>
 
 		<Copy
 			SourceFiles="@(CopyToPackageDirectory)"
-			DestinationFiles="@(CopyToPackageDirectory->'%(DestinationFolder)\%(RecursiveDir)%(Filename)%(Extension)')"
+			DestinationFiles="@(CopyToPackageDirectory->'%(DestinationFolder)/%(RecursiveDir)%(Filename)%(Extension)')"
 			/>
 
 	</Target>
