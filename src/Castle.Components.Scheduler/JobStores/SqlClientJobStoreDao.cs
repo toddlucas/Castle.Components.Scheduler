@@ -32,39 +32,13 @@ namespace Castle.Components.Scheduler.JobStores
         }
 
         /// <summary>
-        /// Creates a PostgreSQL command.
-        /// </summary>
-        /// <returns></returns>
-        protected override IDbCommand CreateCommand()
-        {
-            return new SqlCommand();
-        }
-
-        /// <summary>
-        /// Creates a PostgreSQL parameter.
-        /// </summary>
-        /// <returns></returns>
-        protected override IDbDataParameter CreateParameter()
-        {
-            return new SqlParameter();
-        }
-
-        /// <summary>
-        /// Creates a PostgreSQL command builder.
-        /// </summary>
-        /// <returns></returns>
-        protected override object CreateCommandBuilder()
-        {
-            return null; // TODO: implement
-        }
-
-        /// <summary>
         /// Returns a string suitable for returning an identity field
         /// in a select statement.
         /// </summary>
-        /// <param name="table"></param>
+        /// <param name="prefix">Prefix for scheduler tables.</param>
+        /// <param name="table">Table name of identity column.</param>
         /// <returns>Returns the scope identity.</returns>
-        protected override string GetIdentityForTable(string table)
+        protected override string GetIdentityForTable(string prefix, string table)
         {
             // SCOPE_IDENTITY() returns a decimal type by default.
             // All job tables use INT primary keys.

@@ -112,30 +112,13 @@ namespace Castle.Components.Scheduler.JobStores
         protected abstract IDbConnection CreateConnection();
 
         /// <summary>
-        /// Creates a database command object.
-        /// </summary>
-        /// <returns></returns>
-        protected abstract IDbCommand CreateCommand();
-
-        /// <summary>
-        /// Creates a database parameter object.
-        /// </summary>
-        /// <returns></returns>
-        protected abstract IDbDataParameter CreateParameter();
-
-        /// <summary>
-        /// Creates a command builder.
-        /// </summary>
-        /// <returns></returns>
-        protected abstract object CreateCommandBuilder();
-
-        /// <summary>
         /// Returns a string suitable for returning an identity field
         /// in a select statement.
         /// </summary>
-        /// <param name="table"></param>
+        /// <param name="prefix">Prefix for scheduler tables.</param>
+        /// <param name="table">Table name of identity column.</param>
         /// <returns></returns>
-        protected abstract string GetIdentityForTable(string table);
+        protected abstract string GetIdentityForTable(string prefix, string table);
 
 		/// <summary>
 		/// Registers a scheduler.
@@ -187,7 +170,7 @@ namespace Castle.Components.Scheduler.JobStores
                                 command.Transaction = transaction;
                                 command.CommandText = String.Format(
                                     "INSERT INTO {0}{1} (ClusterName) VALUES (@ClusterName); SELECT {2}",
-                                    TablePrefix, ClustersTableName, GetIdentityForTable(ClustersTableName));
+                                    TablePrefix, ClustersTableName, GetIdentityForTable(TablePrefix, ClustersTableName));
 
                                 AddInputParameter(command, "ClusterName", DbType.String, clusterName);
                                 using (IDataReader rs = command.ExecuteReader())
@@ -222,7 +205,7 @@ namespace Castle.Components.Scheduler.JobStores
                                 "SELECT SchedulerID FROM {0}{1} WHERE ClusterID = @ClusterID AND SchedulerGUID = @SchedulerGUID", 
                                 TablePrefix, SchedulersTableName);
 
-                            AddInputParameter(command, "ClusterID", DbType.String, (int)clusterId);
+                            AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
                             AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
                             int? schedulerId = null;
@@ -230,7 +213,7 @@ namespace Castle.Components.Scheduler.JobStores
                             {
                                 if (rs.Read())
                                 {
-                                    int column = rs.GetOrdinal("schedulerID");
+                                    int column = rs.GetOrdinal("SchedulerID");
                                     if (!rs.IsDBNull(column))
                                     {
                                         schedulerId = (int)rs[column];
@@ -248,7 +231,7 @@ namespace Castle.Components.Scheduler.JobStores
 
                                 AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
                                 AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
-                                AddInputParameter(command, "ClusterID", DbType.String, (int)clusterId);
+                                AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
                                 AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
                                 command.ExecuteNonQuery();
@@ -261,9 +244,9 @@ namespace Castle.Components.Scheduler.JobStores
                                     "INSERT INTO {0}{1} (ClusterID, SchedulerGUID, SchedulerName, LastSeen) VALUES (@ClusterID, @SchedulerGUID, @SchedulerName, @LastSeen)",
                                     TablePrefix, SchedulersTableName);
                                     //"INSERT INTO {0}{1} (ClusterID, SchedulerGUID, SchedulerName, LastSeen) VALUES (@ClusterID, @SchedulerGUID, @SchedulerName, @LastSeen); SELECT {2}",
-                                    //TablePrefix, SchedulersTableName, GetIdentityForTable(ClustersTableName));
+                                    //TablePrefix, SchedulersTableName, GetIdentityForTable(TablePrefix, ClustersTableName));
 
-                                AddInputParameter(command, "ClusterID", DbType.String, (int)clusterId);
+                                AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
                                 AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
                                 AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
                                 AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
@@ -311,14 +294,26 @@ namespace Castle.Components.Scheduler.JobStores
                         {
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
+#if true
                             command.CommandText = String.Format(
-@"DELETE S FROM {0}{1} S 
+@"DELETE
+    FROM {0}{1} S
+		WHERE S.ClusterID IN (
+                SELECT C.ClusterID
+                    FROM {2}{3} C 
+            		    WHERE C.ClusterName = @ClusterName)
+    	    AND S.SchedulerGUID = @SchedulerGUID",
+                                TablePrefix, SchedulersTableName,
+                                TablePrefix, ClustersTableName);
+#else
+                            command.CommandText = String.Format(
+@"DELETE {0}{1} FROM {0}{1} S 
     INNER JOIN {2}{3} C ON C.ClusterID = S.ClusterID
 	WHERE C.ClusterName = @ClusterName
 	    AND S.SchedulerGUID = @SchedulerGUID",
                                 TablePrefix, SchedulersTableName,
                                 TablePrefix, ClustersTableName);
-
+#endif
                             AddInputParameter(command, "ClusterName", DbType.String, clusterName);
                             AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
@@ -502,8 +497,9 @@ namespace Castle.Components.Scheduler.JobStores
 VALUES 
     (@ClusterID, @JobName, @JobDescription, @JobKey, @TriggerObject, @JobDataObject, @CreationTime, @JobState_Pending);
 SELECT {2}",
-                                TablePrefix, JobsTableName, GetIdentityForTable(JobsTableName));
+                                TablePrefix, JobsTableName, GetIdentityForTable(TablePrefix, JobsTableName));
 
+                            AddInputParameter(command, "ClusterID", DbType.Int32, clusterId.Value);
                             AddInputParameter(command, "JobName", DbType.String, jobSpec.Name);
                             AddInputParameter(command, "JobDescription", DbType.String, jobSpec.Description);
                             AddInputParameter(command, "JobKey", DbType.String, jobSpec.JobKey);
@@ -560,7 +556,7 @@ SELECT {2}",
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"SELECT COUNT(*) 
+@"SELECT CAST(COUNT(*) AS INT)
     FROM {0}{1} J
 	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 	    WHERE C.ClusterName = @ClusterName AND J.JobName = @UpdatedJobName",
@@ -585,7 +581,7 @@ SELECT {2}",
                             command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"SELECT COUNT(*) 
+@"SELECT CAST(COUNT(*) AS INT)
     FROM {0}{1} J
 	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 	    WHERE C.ClusterName = @ClusterName AND J.JobName = @ExistingJobName",
@@ -609,7 +605,7 @@ SELECT {2}",
                             command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"UPDATE J
+@"UPDATE {0}{1}
 	SET JobName = @UpdatedJobName,
 		JobDescription = @UpdatedJobDescription,
 		JobKey = @UpdatedJobKey,
@@ -680,7 +676,7 @@ SELECT {2}",
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"SELECT COUNT(*) 
+@"SELECT CAST(COUNT(*) AS INT)
     FROM {0}{1} J
 	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 	    WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName",
@@ -703,14 +699,26 @@ SELECT {2}",
 
                             command = connection.CreateCommand();
                             command.Transaction = transaction;
+#if true
                             command.CommandText = String.Format(
-@"DELETE J
+@"DELETE
+    FROM {0}{1} J
+		WHERE J.ClusterID IN (
+                SELECT C.ClusterID
+                    FROM {2}{3} C 
+            		    WHERE C.ClusterName = @ClusterName)
+    	    AND J.JobName = @JobName",
+                                TablePrefix, JobsTableName,
+                                TablePrefix, ClustersTableName);
+#else
+                            command.CommandText = String.Format(
+@"DELETE {0}{1}
 	FROM {0}{1} J
 		INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName",
                                 TablePrefix, JobsTableName,
                                 TablePrefix, ClustersTableName);
-
+#endif
                             AddInputParameter(command, "ClusterName", DbType.String, clusterName);
                             AddInputParameter(command, "JobName", DbType.String, jobName);
 
@@ -804,7 +812,7 @@ SELECT {2}",
                             command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"SELECT COUNT(*) 
+@"SELECT CAST(COUNT(*) AS INT)
     FROM {0}{1} J
 	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 	    WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName AND J.Version = @Version",
@@ -830,7 +838,7 @@ SELECT {2}",
                             command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"UPDATE J
+@"UPDATE {0}{1}
 	SET JobDescription = @JobDescription,
 		JobKey = @JobKey,
 		TriggerObject = @TriggerObject,
@@ -936,7 +944,7 @@ SELECT {2}",
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"UPDATE J
+@"UPDATE {0}{1}
 	SET JobState = @JobState_Triggered
     FROM {0}{1} J
     INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
@@ -975,15 +983,27 @@ SELECT {2}",
                         {
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
+#if true
                             command.CommandText = String.Format(
-@"DELETE S
+@"DELETE
+    FROM {0}{1} S
+		WHERE S.ClusterID IN (
+                SELECT C.ClusterID
+                    FROM {2}{3} C 
+            		    WHERE C.ClusterName = @ClusterName)
+			AND S.LastSeen < @LapsedExpirationTime",
+                                TablePrefix, SchedulersTableName,
+                                TablePrefix, ClustersTableName);
+#else
+                            command.CommandText = String.Format(
+@"DELETE {0}{1}
     FROM {0}{1} S
 	INNER JOIN {2}{3} C ON C.ClusterID = S.ClusterID
 		WHERE C.ClusterName = @ClusterName
 			AND S.LastSeen < @LapsedExpirationTime",
                                 TablePrefix, SchedulersTableName,
                                 TablePrefix, ClustersTableName);
-
+#endif
                             AddInputParameter(command, "ClusterName", DbType.String, clusterName);
                             AddInputParameter(command, "LapsedExpirationTime", DbType.DateTime, lapsedExpirationTime);
 
@@ -1009,7 +1029,7 @@ SELECT {2}",
                             IDbCommand command = connection.CreateCommand();
                             command.Transaction = transaction;
                             command.CommandText = String.Format(
-@"UPDATE J
+@"UPDATE {0}{1}
 	SET JobState = @JobState_Orphaned,
 		LastExecutionEndTime = @TimeBasis
     FROM {0}{1} J
@@ -1081,7 +1101,7 @@ INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
                                 command = connection.CreateCommand();
                                 command.Transaction = transaction;
                                 command.CommandText = String.Format(
-@"SELECT @NextTriggerFireTime AS NextTriggerFireTime
+@"SELECT J.NextTriggerFireTime AS NextTriggerFireTime
     FROM {0}{1} J
     INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 	    WHERE C.ClusterName = @ClusterName
