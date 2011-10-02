@@ -108,6 +108,9 @@
     <Compile Include="IJobRunner.cs" />
     <Compile Include="JobExecutionDetails.cs" />
     <Compile Include="JobState.cs" />
+    <Compile Include="JobStores\AdoJobStoreDao.cs" />
+    <Compile Include="JobStores\SqlClientJobStore.cs" />
+    <Compile Include="JobStores\SqlClientJobStoreDao.cs" />
     <Compile Include="JobStores\PersistentJobStore.cs" />
     <Compile Include="JobStores\AdoNetJobStoreDao.cs" />
     <Compile Include="JobStores\BaseJobStore.cs" />

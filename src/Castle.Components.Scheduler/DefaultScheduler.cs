@@ -448,7 +448,7 @@ namespace Castle.Components.Scheduler
 							if (!jobDetails.LastJobExecutionDetails.EndTimeUtc.HasValue)
 							{
 								logger.WarnFormat(
-									"Job '{0}' was in the Completed state but its EndTime property was null in violatoin of the scheduler's invariants.  "
+									"Job '{0}' was in the Completed state but its EndTime property was null in violation of the scheduler's invariants.  "
 									+ "It has been set to the current time.", jobDetails.JobSpec.Name);
 								jobDetails.LastJobExecutionDetails.EndTimeUtc = timeBasis;
 							}
