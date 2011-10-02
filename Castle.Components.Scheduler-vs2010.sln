@@ -13,8 +13,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Castle.Components.Scheduler
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Castle.Components.Scheduler.Tests", "src\Castle.Components.Scheduler.Tests\Castle.Components.Scheduler.Tests.csproj", "{3DA11A4B-7C16-4A3B-8847-E2CB4B2017F1}"
 EndProject
-Project("{C8D11400-126E-41CD-887F-60BD40844F9E}") = "Castle.Components.Scheduler.Db", "src\Castle.Components.Scheduler.Db\Castle.Components.Scheduler.Db.dbproj", "{67CBC824-A49E-4E9B-A947-360F3DFE65C3}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Castle.Components.Scheduler.WindsorExtension", "src\Castle.Components.Scheduler.WindsorExtension\Castle.Components.Scheduler.WindsorExtension.csproj", "{31232E6C-B675-4E8C-8E8F-395307454589}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Castle.Components.Scheduler.WindsorExtension.Tests", "src\Castle.Components.Scheduler.WindsorExtension.Tests\Castle.Components.Scheduler.WindsorExtension.Tests.csproj", "{B8DF06A9-48BA-40A7-8B60-964B07604321}"
@@ -33,8 +31,6 @@ Global
 		{3DA11A4B-7C16-4A3B-8847-E2CB4B2017F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3DA11A4B-7C16-4A3B-8847-E2CB4B2017F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3DA11A4B-7C16-4A3B-8847-E2CB4B2017F1}.Release|Any CPU.Build.0 = Release|Any CPU
-		{67CBC824-A49E-4E9B-A947-360F3DFE65C3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{67CBC824-A49E-4E9B-A947-360F3DFE65C3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{31232E6C-B675-4E8C-8E8F-395307454589}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{31232E6C-B675-4E8C-8E8F-395307454589}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{31232E6C-B675-4E8C-8E8F-395307454589}.Release|Any CPU.ActiveCfg = Release|Any CPU
