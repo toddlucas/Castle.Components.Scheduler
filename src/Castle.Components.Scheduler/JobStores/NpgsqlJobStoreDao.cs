@@ -3,22 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Data;
-using System.Data.SqlClient;
+using Npgsql;
 
 namespace Castle.Components.Scheduler.JobStores
 {
 	/// <summary>
 	/// Implements Job Store Dao overrides for PostgreSQL.
 	/// </summary>
-	public class SqlClientJobStoreDao : AdoJobStoreDao
+	public class NpgsqlJobStoreDao : AdoJobStoreDao
 	{
 		/// <summary>
 		/// Creates a PostgreSQL job store.
 		/// </summary>
 		/// <param name="connectionString">The database connection string</param>
 		/// <exception cref="ArgumentNullException">Thrown if <paramref name="connectionString"/> is null</exception>
-		public SqlClientJobStoreDao(string connectionString)
-			: base(connectionString, "@")
+		public NpgsqlJobStoreDao(string connectionString)
+			: base(connectionString, ":")
 		{
 		}
 
@@ -28,7 +28,7 @@ namespace Castle.Components.Scheduler.JobStores
 		/// <returns></returns>
 		protected override IDbConnection CreateConnection()
 		{
-			return new SqlConnection(ConnectionString);
+			return new NpgsqlConnection(ConnectionString);
 		}
 
 		/// <summary>
@@ -37,12 +37,10 @@ namespace Castle.Components.Scheduler.JobStores
 		/// </summary>
 		/// <param name="prefix">Prefix for scheduler tables.</param>
 		/// <param name="table">Table name of identity column.</param>
-		/// <returns>Returns the scope identity.</returns>
+		/// <returns>Returns the sequence associated with the specified table.</returns>
 		protected override string GetIdentityForTable(string prefix, string table)
 		{
-			// SCOPE_IDENTITY() returns a decimal type by default.
-			// All job tables use INT primary keys.
-			return "CAST(SCOPE_IDENTITY() AS INT)";
+			return "CAST(currval('" + prefix + table + "_id_seq') AS INT)";
 		}
 	}
 }
