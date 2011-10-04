@@ -30,11 +30,10 @@ namespace Castle.Components.Scheduler.JobStores
 	/// manually or by some other means before the job store is used.
 	/// </para>
 	/// </remarks>
-	public abstract class AdoJobStoreDao : IJobStoreDao
+	public abstract class AdoJobStoreDao : AdoJobStoreDaoBase, IJobStoreDao
 	{
 		private readonly string connectionString;
 		private readonly string parameterPrefix;
-		private const string defaultTablePrefix = "SCHED_";
 
 		/// <summary>
 		/// Creates an ADO.Net based job store DAO.
@@ -51,7 +50,6 @@ namespace Castle.Components.Scheduler.JobStores
 
 			this.connectionString = connectionString;
 			this.parameterPrefix = parameterPrefix;
-			this.TablePrefix = defaultTablePrefix;
 		}
 
 		/// <summary>
@@ -63,39 +61,10 @@ namespace Castle.Components.Scheduler.JobStores
 		}
 
 		/// <summary>
-		/// Defines a prefix for the scheduler tables.
-		/// </summary>
-		public string TablePrefix { get; set; }
-
-		/// <summary>
-		/// The cluster table name.
-		/// </summary>
-		public string ClustersTableName { get { return "Clusters"; } }
-
-		/// <summary>
-		/// The job table name.
-		/// </summary>
-		public string JobsTableName { get { return "Jobs"; } }
-
-		/// <summary>
-		/// The scheduler table name.
-		/// </summary>
-		public string SchedulersTableName { get { return "Schedulers"; } }
-
-		/// <summary>
 		/// Creates a database connection.
 		/// </summary>
 		/// <returns>The database connection</returns>
 		protected abstract IDbConnection CreateConnection();
-
-		/// <summary>
-		/// Returns a string suitable for returning an identity field
-		/// in a select statement.
-		/// </summary>
-		/// <param name="prefix">Prefix for scheduler tables.</param>
-		/// <param name="table">Table name of identity column.</param>
-		/// <returns></returns>
-		protected abstract string GetIdentityForTable(string prefix, string table);
 
 		/// <summary>
 		/// Registers a scheduler.
@@ -123,38 +92,30 @@ namespace Castle.Components.Scheduler.JobStores
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format("SELECT ClusterID FROM {0}{1} WHERE ClusterName = @ClusterName", TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-
-							using (IDataReader rs = command.ExecuteReader())
+							using (IDbCommand command = CreateCommand(connection, transaction, RegisterSchedulerSelectClusterId))
 							{
-								if (rs.Read())
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+
+								using (IDataReader rs = command.ExecuteReader())
 								{
-									int column = rs.GetOrdinal("ClusterID");
-									if (!rs.IsDBNull(column))
+									if (rs.Read())
 									{
-										clusterId = (int)rs[column];
+										clusterId = (int)rs["ClusterID"];
 									}
 								}
 							}
 
 							if (!clusterId.HasValue)
 							{
-								command = connection.CreateCommand();
-								command.Transaction = transaction;
-								command.CommandText = String.Format(
-									"INSERT INTO {0}{1} (ClusterName) VALUES (@ClusterName); SELECT {2}",
-									TablePrefix, ClustersTableName, GetIdentityForTable(TablePrefix, ClustersTableName));
-
-								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-								using (IDataReader rs = command.ExecuteReader())
+								using (IDbCommand command = CreateCommand(connection, transaction, RegisterSchedulerInsertClusterName))
 								{
-									if (rs.Read())
+									AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+									using (IDataReader rs = command.ExecuteReader())
 									{
-										clusterId = (int)rs[0];
+										if (rs.Read())
+										{
+											clusterId = (int)rs[0];
+										}
 									}
 								}
 							}
@@ -176,59 +137,45 @@ namespace Castle.Components.Scheduler.JobStores
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-								"SELECT SchedulerID FROM {0}{1} WHERE ClusterID = @ClusterID AND SchedulerGUID = @SchedulerGUID", 
-								TablePrefix, SchedulersTableName);
-
-							AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
-							AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
-
 							int? schedulerId = null;
-							using (IDataReader rs = command.ExecuteReader())
+							using (IDbCommand command = CreateCommand(connection, transaction, RegisterSchedulerSelectSchedulerId))
 							{
-								if (rs.Read())
+								AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
+								AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
+
+								using (IDataReader rs = command.ExecuteReader())
 								{
-									int column = rs.GetOrdinal("SchedulerID");
-									if (!rs.IsDBNull(column))
+									if (rs.Read())
 									{
-										schedulerId = (int)rs[column];
+										schedulerId = (int)rs["SchedulerID"];
 									}
 								}
 							}
 
 							if (schedulerId.HasValue)
 							{
-								command = connection.CreateCommand();
-								command.Transaction = transaction;
-								command.CommandText = String.Format(
-									"UPDATE {0}{1} SET SchedulerName = @SchedulerName, LastSeen = @LastSeen WHERE ClusterID = @ClusterID AND SchedulerGUID = @SchedulerGUID",
-									TablePrefix, SchedulersTableName);
+								using (IDbCommand command = CreateCommand(connection, transaction, RegisterSchedulerUpdateScheduler))
+								{
+									AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
+									AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
 
-								AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
-								AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
-								AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
-								AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
+									AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
+									AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
-								command.ExecuteNonQuery();
+									command.ExecuteNonQuery();
+								}
 							}
 							else
 							{
-								command = connection.CreateCommand();
-								command.Transaction = transaction;
-								command.CommandText = String.Format(
-									"INSERT INTO {0}{1} (ClusterID, SchedulerGUID, SchedulerName, LastSeen) VALUES (@ClusterID, @SchedulerGUID, @SchedulerName, @LastSeen)",
-									TablePrefix, SchedulersTableName);
-									//"INSERT INTO {0}{1} (ClusterID, SchedulerGUID, SchedulerName, LastSeen) VALUES (@ClusterID, @SchedulerGUID, @SchedulerName, @LastSeen); SELECT {2}",
-									//TablePrefix, SchedulersTableName, GetIdentityForTable(TablePrefix, ClustersTableName));
+								using (IDbCommand command = CreateCommand(connection, transaction, RegisterSchedulerInsertScheduler))
+								{
+									AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
+									AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
+									AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
+									AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
 
-								AddInputParameter(command, "ClusterID", DbType.Int32, (int)clusterId);
-								AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
-								AddInputParameter(command, "SchedulerName", DbType.String, schedulerName);
-								AddInputParameter(command, "LastSeen", DbType.DateTime, lastSeenUtc);
-
-								command.ExecuteNonQuery();
+									command.ExecuteNonQuery();
+								}
 							}
 
 							transaction.Commit();
@@ -269,49 +216,26 @@ namespace Castle.Components.Scheduler.JobStores
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-#if true
-							command.CommandText = String.Format(
-@"DELETE
-	FROM {0}{1} S
-		WHERE S.ClusterID IN (
-				SELECT C.ClusterID
-					FROM {2}{3} C 
-						WHERE C.ClusterName = @ClusterName)
-			AND S.SchedulerGUID = @SchedulerGUID",
-								TablePrefix, SchedulersTableName,
-								TablePrefix, ClustersTableName);
-#else
-							command.CommandText = String.Format(
-@"DELETE {0}{1} FROM {0}{1} S 
-	INNER JOIN {2}{3} C ON C.ClusterID = S.ClusterID
-	WHERE C.ClusterName = @ClusterName
-		AND S.SchedulerGUID = @SchedulerGUID",
-								TablePrefix, SchedulersTableName,
-								TablePrefix, ClustersTableName);
-#endif
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
+							using (IDbCommand command = CreateCommand(connection, transaction, UnregisterSchedulerDeleteScheduler))
+							{
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							//
 							// Immediately orphan all jobs currently on the scheduler.
 							//
 
-							command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobState = @JobState_Orphaned
-	WHERE JobState = @JobState_Running
-		AND LastExecutionSchedulerGUID = @SchedulerGUID",
-								TablePrefix, JobsTableName);
+							using (IDbCommand command = CreateCommand(connection, transaction, UnregisterSchedulerUpdateJobs))
+							{
+								AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
+								AddInputParameter(command, "JobState_Running", DbType.Int32, (int)JobState.Running);
+								AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
 
-							AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
-							AddInputParameter(command, "JobState_Running", DbType.Int32, (int)JobState.Running);
-							AddInputParameter(command, "SchedulerGUID", DbType.Guid, schedulerGuid);
-
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 						}
@@ -355,22 +279,17 @@ namespace Castle.Components.Scheduler.JobStores
 							// Find the cluster.
 							//
 
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT ClusterID
-	FROM {0}{1}
-	WHERE ClusterName = @ClusterName",
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-
 							int? clusterId = null;
-							using (IDataReader rs = command.ExecuteReader())
+							using (IDbCommand command = CreateCommand(connection, transaction, CreateJobSelectClusterId))
 							{
-								if (rs.Read())
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+
+								using (IDataReader rs = command.ExecuteReader())
 								{
-									clusterId = (int)rs["clusterID"];
+									if (rs.Read())
+									{
+										clusterId = (int)rs["clusterID"];
+									}
 								}
 							}
 
@@ -383,23 +302,18 @@ namespace Castle.Components.Scheduler.JobStores
 							// Find the job if it already exists.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT J.JobID AS JobID
-	FROM {0}{1} J
-	WHERE J.ClusterID = @ClusterID AND J.JobName = @JobName",
-								TablePrefix, JobsTableName);
-
-							AddInputParameter(command, "ClusterID", DbType.Int32, clusterId.Value);
-							AddInputParameter(command, "JobName", DbType.String, jobSpec.Name);
-
 							int? jobId = null;
-							using (IDataReader rs = command.ExecuteReader())
+							using (IDbCommand command = CreateCommand(connection, transaction, CreateJobSelectJobId))
 							{
-								if (rs.Read())
+								AddInputParameter(command, "ClusterID", DbType.Int32, clusterId.Value);
+								AddInputParameter(command, "JobName", DbType.String, jobSpec.Name);
+
+								using (IDataReader rs = command.ExecuteReader())
 								{
-									jobId = (int)rs["JobID"];
+									if (rs.Read())
+									{
+										jobId = (int)rs["JobID"];
+									}
 								}
 							}
 
@@ -417,42 +331,29 @@ namespace Castle.Components.Scheduler.JobStores
 								}
 								else if (conflictAction == CreateJobConflictAction.Replace)
 								{
-									command = connection.CreateCommand();
-									command.Transaction = transaction;
-									command.CommandText = String.Format(
-										"DELETE FROM {0}{1} WHERE JobID = @JobID",
-										TablePrefix, JobsTableName);
+									using (IDbCommand command = CreateCommand(connection, transaction, CreateJobDeleteJob))
+									{
+										AddInputParameter(command, "JobID", DbType.Int32, jobId.Value);
 
-									AddInputParameter(command, "JobID", DbType.Int32, jobId.Value);
-
-									command.ExecuteNonQuery();
+										command.ExecuteNonQuery();
+									}
 								}
 								else if (conflictAction == CreateJobConflictAction.Update)
 								{
-									command = connection.CreateCommand();
-									command.Transaction = transaction;
-									command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobDescription = @JobDescription,
-		JobKey = @JobKey,
-		TriggerObject = @TriggerObject,
-		JobDataObject = @JobDataObject,
-		JobState = CASE JobState WHEN @JobState_Scheduled THEN @JobState_Pending ELSE JobState END,
-		Version = Version + 1
-	WHERE JobID = @JobID",
-										TablePrefix, JobsTableName);
+									using (IDbCommand command = CreateCommand(connection, transaction, CreateJobUpdateJob))
+									{
+										AddInputParameter(command, "JobDescription", DbType.String, jobSpec.Description);
+										AddInputParameter(command, "JobKey", DbType.String, jobSpec.JobKey);
+										AddInputParameter(command, "TriggerObject", DbType.Binary,
+														  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.Trigger)));
+										AddInputParameter(command, "JobDataObject", DbType.Binary,
+														  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.JobData)));
 
-									AddInputParameter(command, "JobDescription", DbType.String, jobSpec.Description);
-									AddInputParameter(command, "JobKey", DbType.String, jobSpec.JobKey);
-									AddInputParameter(command, "TriggerObject", DbType.Binary,
-													  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.Trigger)));
-									AddInputParameter(command, "JobDataObject", DbType.Binary,
-													  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.JobData)));
+										AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
+										AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
 
-									AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
-									AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
-
-									command.ExecuteNonQuery();
+										command.ExecuteNonQuery();
+									}
 
 									return true;
 								}
@@ -466,31 +367,24 @@ namespace Castle.Components.Scheduler.JobStores
 							// Insert new job.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"INSERT INTO {0}{1} 
-	(ClusterID, JobName, JobDescription, JobKey, TriggerObject, JobDataObject, CreationTime, JobState)
-VALUES 
-	(@ClusterID, @JobName, @JobDescription, @JobKey, @TriggerObject, @JobDataObject, @CreationTime, @JobState_Pending);
-SELECT {2}",
-								TablePrefix, JobsTableName, GetIdentityForTable(TablePrefix, JobsTableName));
+							using (IDbCommand command = CreateCommand(connection, transaction, CreateJobInsertJob))
+							{
+								AddInputParameter(command, "ClusterID", DbType.Int32, clusterId.Value);
+								AddInputParameter(command, "JobName", DbType.String, jobSpec.Name);
+								AddInputParameter(command, "JobDescription", DbType.String, jobSpec.Description);
+								AddInputParameter(command, "JobKey", DbType.String, jobSpec.JobKey);
+								AddInputParameter(command, "TriggerObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.Trigger)));
+								AddInputParameter(command, "JobDataObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.JobData)));
+								AddInputParameter(command, "CreationTime", DbType.DateTime, creationTimeUtc);
 
-							AddInputParameter(command, "ClusterID", DbType.Int32, clusterId.Value);
-							AddInputParameter(command, "JobName", DbType.String, jobSpec.Name);
-							AddInputParameter(command, "JobDescription", DbType.String, jobSpec.Description);
-							AddInputParameter(command, "JobKey", DbType.String, jobSpec.JobKey);
-							AddInputParameter(command, "TriggerObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.Trigger)));
-							AddInputParameter(command, "JobDataObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobSpec.JobData)));
-							AddInputParameter(command, "CreationTime", DbType.DateTime, creationTimeUtc);
+								AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
 
-							AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
+								command.ExecuteNonQuery();
 
-							command.ExecuteNonQuery();
-
-							transaction.Commit();
+								transaction.Commit();
+							}
 
 							return true;
 						}
@@ -530,87 +424,59 @@ SELECT {2}",
 							// Look for a job already having the update name.
 							//
 
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT CAST(COUNT(*) AS INT)
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @UpdatedJobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "UpdatedJobName", DbType.String, updatedJobSpec.Name);
-
-							int jobCount = (int)command.ExecuteScalar();
-							if (jobCount > 0)
+							using (IDbCommand command = CreateCommand(connection, transaction, SelectJobCount))
 							{
-								throw new SchedulerException(String.Format(CultureInfo.CurrentCulture,
-																		   "Cannot rename job '{0}' to '{1}' because another job with the new name already exists.",
-																		   existingJobName, updatedJobSpec.Name));
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, updatedJobSpec.Name);
+
+								int jobCount = (int)command.ExecuteScalar();
+								if (jobCount > 0)
+								{
+									throw new SchedulerException(String.Format(CultureInfo.CurrentCulture,
+																			   "Cannot rename job '{0}' to '{1}' because another job with the new name already exists.",
+																			   existingJobName, updatedJobSpec.Name));
+								}
 							}
 
 							//
 							// Look for a job with the existing name.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT CAST(COUNT(*) AS INT)
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @ExistingJobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "ExistingJobName", DbType.String, existingJobName);
-
-							jobCount = (int)command.ExecuteScalar();
-							if (jobCount > 0)
+							using (IDbCommand command = CreateCommand(connection, transaction, SelectJobCount))
 							{
-								throw new SchedulerException(String.Format(CultureInfo.CurrentCulture,
-																		   "Job '{0}' does not exist so it cannot be updated.", existingJobName));
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, existingJobName);
+
+								int jobCount = (int)command.ExecuteScalar();
+								if (jobCount > 0)
+								{
+									throw new SchedulerException(String.Format(CultureInfo.CurrentCulture,
+																			   "Job '{0}' does not exist so it cannot be updated.", existingJobName));
+								}
 							}
 
 							//
 							// Update the job.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobName = @UpdatedJobName,
-		JobDescription = @UpdatedJobDescription,
-		JobKey = @UpdatedJobKey,
-		TriggerObject = @UpdatedTriggerObject,
-		JobDataObject = @UpdatedJobDataObject,
-		JobState = CASE JobState WHEN @JobState_Scheduled THEN @JobState_Pending ELSE JobState END,
-		Version = Version + 1
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @ExistingJobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
+							using (IDbCommand command = CreateCommand(connection, transaction, UpdateJobUpdateJob))
+							{
+								AddInputParameter(command, "UpdatedJobName", DbType.String, updatedJobSpec.Name);
+								AddInputParameter(command, "UpdatedJobDescription", DbType.String, updatedJobSpec.Description);
+								AddInputParameter(command, "UpdatedJobKey", DbType.String, updatedJobSpec.JobKey);
+								AddInputParameter(command, "UpdatedTriggerObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(updatedJobSpec.Trigger)));
+								AddInputParameter(command, "UpdatedJobDataObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(updatedJobSpec.JobData)));
 
-							AddInputParameter(command, "UpdatedJobName", DbType.String, updatedJobSpec.Name);
-							AddInputParameter(command, "UpdatedJobDescription", DbType.String, updatedJobSpec.Description);
-							AddInputParameter(command, "UpdatedJobKey", DbType.String, updatedJobSpec.JobKey);
-							AddInputParameter(command, "UpdatedTriggerObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(updatedJobSpec.Trigger)));
-							AddInputParameter(command, "UpdatedJobDataObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(updatedJobSpec.JobData)));
+								AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
+								AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
 
-							AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
-							AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "ExistingJobName", DbType.String, existingJobName);
 
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "ExistingJobName", DbType.String, existingJobName);
-
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 						}
@@ -650,56 +516,30 @@ SELECT {2}",
 							// Look for an existing job.
 							//
 
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT CAST(COUNT(*) AS INT)
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobName", DbType.String, jobName);
-
-							int jobCount = (int)command.ExecuteScalar();
-							if (jobCount == 0)
+							using (IDbCommand command = CreateCommand(connection, transaction, SelectJobCount))
 							{
-								transaction.Commit();
-								return false;
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, jobName);
+
+								int jobCount = (int)command.ExecuteScalar();
+								if (jobCount == 0)
+								{
+									transaction.Commit();
+									return false;
+								}
 							}
 
 							//
 							// Delete the job.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-#if true
-							command.CommandText = String.Format(
-@"DELETE
-	FROM {0}{1} J
-		WHERE J.ClusterID IN (
-				SELECT C.ClusterID
-					FROM {2}{3} C 
-						WHERE C.ClusterName = @ClusterName)
-			AND J.JobName = @JobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-#else
-							command.CommandText = String.Format(
-@"DELETE {0}{1}
-	FROM {0}{1} J
-		INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-#endif
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobName", DbType.String, jobName);
+							using (IDbCommand command = CreateCommand(connection, transaction, DeleteJobDeleteJob))
+							{
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, jobName);
 
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 
@@ -734,28 +574,19 @@ SELECT {2}",
 				{
 					connection.Open();
 
-					IDbCommand command = connection.CreateCommand();
-					command.CommandText = String.Format(
-@"SELECT J.JobName, J.JobDescription, J.JobKey, J.TriggerObject, J.JobDataObject, J.CreationTime,
-		J.JobState, J.NextTriggerFireTime, J.NextTriggerMisfireThresholdSeconds,
-		J.LastExecutionSchedulerGUID, J.LastExecutionStartTime, J.LastExecutionEndTime, J.LastExecutionSucceeded, J.LastExecutionStatusMessage,
-		J.Version
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName",
-						TablePrefix, JobsTableName,
-						TablePrefix, ClustersTableName);
-
-					AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-					AddInputParameter(command, "JobName", DbType.String, jobName);
-
-					VersionedJobDetails jobDetails;
-					using (IDataReader reader = command.ExecuteReader())
+					using (IDbCommand command = CreateCommand(connection, GetJobDetailsSelect))
 					{
-						jobDetails = reader.Read() ? BuildJobDetailsFromResultSet(reader) : null;
-					}
+						AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+						AddInputParameter(command, "JobName", DbType.String, jobName);
 
-					return jobDetails;
+						VersionedJobDetails jobDetails;
+						using (IDataReader reader = command.ExecuteReader())
+						{
+							jobDetails = reader.Read() ? BuildJobDetailsFromResultSet(reader) : null;
+						}
+
+						return jobDetails;
+					}
 				}
 			}
 			catch (Exception ex)
@@ -785,90 +616,62 @@ SELECT {2}",
 							// Look for a job with the existing name and version.
 							//
 
-							IDbCommand command = connection.CreateCommand();
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT CAST(COUNT(*) AS INT)
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName AND J.Version = @Version",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobName", DbType.String, jobDetails.JobSpec.Name);
-							AddInputParameter(command, "Version", DbType.Int32, jobDetails.Version);
-
-							int jobCount = (int)command.ExecuteScalar();
-							if (jobCount == 0)
+							using (IDbCommand command = CreateCommand(connection, transaction, SelectVersionedJobCount))
 							{
-								throw new ConcurrentModificationException(
-									String.Format("Job '{0}' does not exist or was concurrently modified in the database.",
-												  jobDetails.JobSpec.Name));
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, jobDetails.JobSpec.Name);
+								AddInputParameter(command, "Version", DbType.Int32, jobDetails.Version);
+
+								int jobCount = (int)command.ExecuteScalar();
+								if (jobCount == 0)
+								{
+									throw new ConcurrentModificationException(
+										String.Format("Job '{0}' does not exist or was concurrently modified in the database.",
+													  jobDetails.JobSpec.Name));
+								}
 							}
 
 							//
 							// Update the job.
 							//
 
-							command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobDescription = @JobDescription,
-		JobKey = @JobKey,
-		TriggerObject = @TriggerObject,
-		JobDataObject = @JobDataObject,
-		JobState = @JobState,
-		NextTriggerFireTime = @NextTriggerFireTime,
-		NextTriggerMisfireThresholdSeconds = @NextTriggerMisfireThresholdSeconds,
-		LastExecutionSchedulerGUID = @LastExecutionSchedulerGUID,
-		LastExecutionStartTime = @LastExecutionStartTime,
-		LastExecutionEndTime = @LastExecutionEndTime,
-		LastExecutionSucceeded = @LastExecutionSucceeded,
-		LastExecutionStatusMessage = @LastExecutionStatusMessage,
-		Version = @Version + 1
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName AND J.JobName = @JobName AND J.Version = @Version",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
+							using (IDbCommand command = CreateCommand(connection, transaction, SaveJobDetailsUpdateJob))
+							{
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
 
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobName", DbType.String, jobDetails.JobSpec.Name);
+								AddInputParameter(command, "JobDescription", DbType.String, jobDetails.JobSpec.Description);
+								AddInputParameter(command, "JobKey", DbType.String, jobDetails.JobSpec.JobKey);
+								AddInputParameter(command, "TriggerObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobDetails.JobSpec.Trigger)));
 
-							AddInputParameter(command, "JobName", DbType.String, jobDetails.JobSpec.Name);
-							AddInputParameter(command, "JobDescription", DbType.String, jobDetails.JobSpec.Description);
-							AddInputParameter(command, "JobKey", DbType.String, jobDetails.JobSpec.JobKey);
-							AddInputParameter(command, "TriggerObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobDetails.JobSpec.Trigger)));
+								AddInputParameter(command, "JobDataObject", DbType.Binary,
+												  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobDetails.JobSpec.JobData)));
+								AddInputParameter(command, "JobState", DbType.Int32, jobDetails.JobState);
+								AddInputParameter(command, "NextTriggerFireTime", DbType.DateTime,
+												  DbUtils.MapNullableToDbValue(jobDetails.NextTriggerFireTimeUtc));
+								int? nextTriggerMisfireThresholdSeconds = jobDetails.NextTriggerMisfireThreshold.HasValue
+																			? (int?)jobDetails.NextTriggerMisfireThreshold.Value.TotalSeconds
+																			: null;
+								AddInputParameter(command, "NextTriggerMisfireThresholdSeconds", DbType.Int32,
+												  DbUtils.MapNullableToDbValue(nextTriggerMisfireThresholdSeconds));
 
-							AddInputParameter(command, "JobDataObject", DbType.Binary,
-											  DbUtils.MapObjectToDbValue(DbUtils.SerializeObject(jobDetails.JobSpec.JobData)));
-							AddInputParameter(command, "JobState", DbType.Int32, jobDetails.JobState);
-							AddInputParameter(command, "NextTriggerFireTime", DbType.DateTime,
-											  DbUtils.MapNullableToDbValue(jobDetails.NextTriggerFireTimeUtc));
-							int? nextTriggerMisfireThresholdSeconds = jobDetails.NextTriggerMisfireThreshold.HasValue
-																		? (int?)jobDetails.NextTriggerMisfireThreshold.Value.TotalSeconds
-																		: null;
-							AddInputParameter(command, "NextTriggerMisfireThresholdSeconds", DbType.Int32,
-											  DbUtils.MapNullableToDbValue(nextTriggerMisfireThresholdSeconds));
+								JobExecutionDetails execution = jobDetails.LastJobExecutionDetails;
+								AddInputParameter(command, "LastExecutionSchedulerGUID", DbType.Guid,
+												  execution != null ? (object)execution.SchedulerGuid : DBNull.Value);
+								AddInputParameter(command, "LastExecutionStartTime", DbType.DateTime,
+												  execution != null ? (object)execution.StartTimeUtc : DBNull.Value);
+								AddInputParameter(command, "LastExecutionEndTime", DbType.DateTime,
+												  execution != null ? DbUtils.MapNullableToDbValue(execution.EndTimeUtc) : DBNull.Value);
+								AddInputParameter(command, "LastExecutionSucceeded", DbType.Boolean,
+												  execution != null ? (object)execution.Succeeded : DBNull.Value);
+								AddInputParameter(command, "LastExecutionStatusMessage", DbType.String,
+												  execution != null ? (object)execution.StatusMessage : DBNull.Value);
 
-							JobExecutionDetails execution = jobDetails.LastJobExecutionDetails;
-							AddInputParameter(command, "LastExecutionSchedulerGUID", DbType.Guid,
-											  execution != null ? (object)execution.SchedulerGuid : DBNull.Value);
-							AddInputParameter(command, "LastExecutionStartTime", DbType.DateTime,
-											  execution != null ? (object)execution.StartTimeUtc : DBNull.Value);
-							AddInputParameter(command, "LastExecutionEndTime", DbType.DateTime,
-											  execution != null ? DbUtils.MapNullableToDbValue(execution.EndTimeUtc) : DBNull.Value);
-							AddInputParameter(command, "LastExecutionSucceeded", DbType.Boolean,
-											  execution != null ? (object)execution.Succeeded : DBNull.Value);
-							AddInputParameter(command, "LastExecutionStatusMessage", DbType.String,
-											  execution != null ? (object)execution.StatusMessage : DBNull.Value);
+								AddInputParameter(command, "Version", DbType.Int32, jobDetails.Version);
 
-							AddInputParameter(command, "Version", DbType.Int32, jobDetails.Version);
-
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 
@@ -918,26 +721,16 @@ SELECT {2}",
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobState = @JobState_Triggered
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName
-			AND J.JobState = @JobState_Scheduled
-			AND (J.NextTriggerFireTime IS NULL OR J.NextTriggerFireTime <= @TimeBasis)",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
+							using (IDbCommand command = CreateCommand(connection, transaction, GetNextJobToProcessTriggerJobs))
+							{
+								AddInputParameter(command, "JobState_Triggered", DbType.Int32, (int)JobState.Triggered);
 
-							AddInputParameter(command, "JobState_Triggered", DbType.Int32, (int)JobState.Triggered);
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
+								AddInputParameter(command, "TimeBasis", DbType.DateTime, timeBasisUtc);
 
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
-							AddInputParameter(command, "TimeBasis", DbType.DateTime, timeBasisUtc);
-
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 						}
@@ -958,33 +751,13 @@ SELECT {2}",
 
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-#if true
-							command.CommandText = String.Format(
-@"DELETE
-	FROM {0}{1} S
-		WHERE S.ClusterID IN (
-				SELECT C.ClusterID
-					FROM {2}{3} C 
-						WHERE C.ClusterName = @ClusterName)
-			AND S.LastSeen < @LapsedExpirationTime",
-								TablePrefix, SchedulersTableName,
-								TablePrefix, ClustersTableName);
-#else
-							command.CommandText = String.Format(
-@"DELETE {0}{1}
-	FROM {0}{1} S
-	INNER JOIN {2}{3} C ON C.ClusterID = S.ClusterID
-		WHERE C.ClusterName = @ClusterName
-			AND S.LastSeen < @LapsedExpirationTime",
-								TablePrefix, SchedulersTableName,
-								TablePrefix, ClustersTableName);
-#endif
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "LapsedExpirationTime", DbType.DateTime, lapsedExpirationTime);
+							using (IDbCommand command = CreateCommand(connection, transaction, GetNextJobToProcessDeleteSchedulers))
+							{
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "LapsedExpirationTime", DbType.DateTime, lapsedExpirationTime);
 
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 						}
@@ -1003,29 +776,16 @@ SELECT {2}",
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"UPDATE {0}{1}
-	SET JobState = @JobState_Orphaned,
-		LastExecutionEndTime = @TimeBasis
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-	LEFT OUTER JOIN {4}{5} S ON S.SchedulerGUID = J.LastExecutionSchedulerGUID
-		WHERE C.ClusterName = @ClusterName
-			AND J.JobState = @JobState_Running
-			AND S.SchedulerID IS NULL",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName,
-								TablePrefix, SchedulersTableName);
+							using (IDbCommand command = CreateCommand(connection, transaction, GetNextJobToProcessOrphanJobs))
+							{
+								AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
+								AddInputParameter(command, "TimeBasis", DbType.DateTime, timeBasisUtc);
 
-							AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
-							AddInputParameter(command, "TimeBasis", DbType.DateTime, timeBasisUtc);
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobState_Running", DbType.Int32, (int)JobState.Running);
 
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobState_Running", DbType.Int32, (int)JobState.Running);
-
-							command.ExecuteNonQuery();
+								command.ExecuteNonQuery();
+							}
 
 							transaction.Commit();
 						}
@@ -1046,58 +806,37 @@ SELECT {2}",
 					{
 						try
 						{
-							IDbCommand command = connection.CreateCommand();
-							command.Transaction = transaction;
-							command.CommandText = String.Format(
-@"SELECT 
-	J.JobName, J.JobDescription, J.JobKey, J.TriggerObject, J.JobDataObject, J.CreationTime,
-	J.JobState, J.NextTriggerFireTime, J.NextTriggerMisfireThresholdSeconds,
-	J.LastExecutionSchedulerGUID, J.LastExecutionStartTime, J.LastExecutionEndTime, J.LastExecutionSucceeded, J.LastExecutionStatusMessage,
-	J.Version
-FROM {0}{1} J
-INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-	WHERE C.ClusterName = @ClusterName
-		AND J.JobState IN (@JobState_Pending, @JobState_Triggered, @JobState_Completed, @JobState_Orphaned)",
-								TablePrefix, JobsTableName,
-								TablePrefix, ClustersTableName);
-
-							AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-							AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
-							AddInputParameter(command, "JobState_Triggered", DbType.Int32, (int)JobState.Triggered);
-							AddInputParameter(command, "JobState_Completed", DbType.Int32, (int)JobState.Completed);
-							AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
-
 							VersionedJobDetails jobDetails;
-							using (IDataReader reader = command.ExecuteReader())
+							using (IDbCommand command = CreateCommand(connection, transaction, GetNextJobToProcessSelectNext))
 							{
-								jobDetails = reader.Read() ? BuildJobDetailsFromResultSet(reader) : null;
+								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+								AddInputParameter(command, "JobState_Pending", DbType.Int32, (int)JobState.Pending);
+								AddInputParameter(command, "JobState_Triggered", DbType.Int32, (int)JobState.Triggered);
+								AddInputParameter(command, "JobState_Completed", DbType.Int32, (int)JobState.Completed);
+								AddInputParameter(command, "JobState_Orphaned", DbType.Int32, (int)JobState.Orphaned);
+
+								using (IDataReader reader = command.ExecuteReader())
+								{
+									jobDetails = reader.Read() ? BuildJobDetailsFromResultSet(reader) : null;
+								}
 							}
 
 							if (jobDetails == null)
 							{
-								command = connection.CreateCommand();
-								command.Transaction = transaction;
-								command.CommandText = String.Format(
-@"SELECT J.NextTriggerFireTime AS NextTriggerFireTime
-	FROM {0}{1} J
-	INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
-		WHERE C.ClusterName = @ClusterName
-			AND J.JobState = @JobState_Scheduled
-		ORDER BY J.NextTriggerFireTime ASC",
-									TablePrefix, JobsTableName,
-									TablePrefix, ClustersTableName);
-
-								AddInputParameter(command, "ClusterName", DbType.String, clusterName);
-								AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
-
-								using (IDataReader rs = command.ExecuteReader())
+								using (IDbCommand command = CreateCommand(connection, transaction, GetNextJobToProcessSelectNextTime))
 								{
-									if (rs.Read())
+									AddInputParameter(command, "ClusterName", DbType.String, clusterName);
+									AddInputParameter(command, "JobState_Scheduled", DbType.Int32, (int)JobState.Scheduled);
+
+									using (IDataReader rs = command.ExecuteReader())
 									{
-										int column = rs.GetOrdinal("NextTriggerFireTime");
-										if (!rs.IsDBNull(column))
+										if (rs.Read())
 										{
-											nextTriggerFireTimeUtc = (DateTime)rs[column];
+											int column = rs.GetOrdinal("NextTriggerFireTime");
+											if (!rs.IsDBNull(column))
+											{
+												nextTriggerFireTimeUtc = (DateTime)rs[column];
+											}
 										}
 									}
 								}
@@ -1132,22 +871,20 @@ INNER JOIN {2}{3} C ON C.ClusterID = J.ClusterID
 		{
 			try
 			{
+				List<string> jobNames = new List<string>();
+
 				using (IDbConnection connection = CreateConnection())
+				using (IDbCommand command = CreateCommand(connection, SelectJobNames))
 				{
-					IDbCommand command = connection.CreateCommand();
-					command.CommandText = String.Format("SELECT JobName FROM {0}{1}", TablePrefix, JobsTableName);
-
 					connection.Open();
-
-					List<string> jobNames = new List<string>();
 					using (IDataReader reader = command.ExecuteReader(CommandBehavior.SingleResult))
 					{
 						while (reader.Read())
 							jobNames.Add(reader.GetString(0));
 					}
-
-					return jobNames.ToArray();
 				}
+
+				return jobNames.ToArray();
 			}
 			catch (Exception ex)
 			{
